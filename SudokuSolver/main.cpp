@@ -1,5 +1,6 @@
 #include <iostream>
 #include <chrono>
+
 #include "sudoku.h"
 
 //#define DIAGNOSTICS
@@ -35,11 +36,11 @@ int main(int argsc, const char *args[])
 	std::cout << "\nAverage Time over " << reps << " cycles: " << average << " us";
 #else
 
-	Sudoku board;
+	sudoku board;
 	std::cout << "enter board (0 for unknown):\n";
 	std::cin >> board;
 
-	std::cout << board.countComplete() << " / 81:\n" << board << '\n';
+	std::cout << board.countComplete() << " / 81:\n" << board << std::endl;
 
 	board.solve(argsc == 2 && strcmp(args[1], "deep") == 0);
 

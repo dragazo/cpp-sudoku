@@ -1,324 +1,149 @@
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
+#include <bitset>
+
 #include "Sudoku.h"
 
-// ---------------------------------------------------
-// construction / destruction / assignment
-// ---------------------------------------------------
+// ----------- //
 
-Sudoku::Sudoku() : data(new tile_t[81]) {}
-Sudoku::~Sudoku()
+// -- query -- //
+
+// ----------- //
+
+bool sudoku::valid() const
 {
-	delete[] data;
-}
+	const sudoku &board(*this);
 
-Sudoku::Sudoku(const Sudoku &other) : data(new tile_t[81])
-{
-	for (int i(0); i < 81; ++i)
-		data[i] = other.data[i];
-}
-Sudoku::Sudoku(Sudoku &&other)
-{
-	data = other.data;
-	other.data = nullptr;
-}
-
-Sudoku& Sudoku::operator=(const Sudoku &other)
-{
-	for (int i(0); i < 81; ++i)
-		data[i] = other.data[i];
-
-	return *this;
-}
-Sudoku& Sudoku::operator=(Sudoku &&other)
-{
-	tile_t *temp(data);
-	data = other.data;
-	other.data = temp;
-
-	return *this;
-}
-
-// ---------------------------------------------------
-// access methods
-// ---------------------------------------------------
-
-tile_t& Sudoku::operator()(int row, int col)
-{
-	return data[row * 9 + col];
-}
-tile_t Sudoku::operator()(int row, int col) const
-{
-	return data[row * 9 + col];
-}
-
-int Sudoku::countComplete() const
-{
-	int count(0);
-
-	for (int i(0); i < 81; ++i)
-		if (data[i] != 0) ++count;
-
-	return count;
-}
-int Sudoku::countIncomplete() const
-{
-	int count(0);
-
-	for (int i(0); i < 81; ++i)
-		if (data[i] == 0) ++count;
-
-	return count;
-}
-
-void Sudoku::clear()
-{
-	for (int i(0); i < 81; ++i) data[i] = 0;
-}
-
-bool Sudoku::strictEquals(const Sudoku &other) const
-{
-	for (int i(0); i < 81; ++i) if (data[i] != other.data[i]) return false;
-
-	return true;
-}
-bool Sudoku::fuzzyEquals(const Sudoku &other) const
-{
-	for (int i(0); i < 81; ++i) if (data[i] != 0 && other.data[i] != 0 && data[i] != other.data[i]) return false;
-	
-	return true;
-}
-
-bool Sudoku::completed() const
-{
-	for (int i(0); i < 81; ++i) if (data[i] == 0) return false;
-
-	return true;
-}
-bool Sudoku::valid() const
-{
-	const Sudoku &board(*this);
-
-	for (int row(0); row < 9; ++row) for (int col(0); col < 9; ++col)
+	// for each board position
+	for (int row = 0; row < 9; ++row) for (int col = 0; col < 9; ++col)
 	{
-		for (tile_t mark(1); mark <= 9; ++mark)
+		// for each number
+		for (tile_t mark = 1; mark <= 9; ++mark)
 		{
-			int count;
-			
-			// count row
-			count = 0;
-			for (int i(0); i < 9; ++i) if (board(row, i) == mark) ++count;
-			if (count > 1) return false;
+			// count occurrences in this row
+			int count = 0;
+			for (int i = 0; i < 9; ++i) if (board(row, i) == mark) ++count;
+			if (count > 1) return false; // if there's more than 1 it's illegal
 
-			// count column
+			// count occurrences in this column
 			count = 0;
-			for (int i(0); i < 9; ++i) if (board(i, col) == mark) ++count;
-			if (count > 1) return false;
+			for (int i = 0; i < 9; ++i) if (board(i, col) == mark) ++count;
+			if (count > 1) return false; // if there's more than 1 it's illegal
 
-			// count block
+			// ount occurrences in this block
 			count = 0;
-			int blockRow(row / 3), blockCol(col / 3);
-			for (int _r(0); _r < 3; ++_r) for (int _c(0); _c < 3; ++_c)
-			{
-				int r(blockRow * 3 + _r), c(blockCol * 3 + _c);
-				if (board(r, c) == mark) ++count;
-			}
-			if (count > 1) return false;
+			int blockRow = row / 3;
+			int blockCol = col / 3;
+			for (int _r = 0; _r < 3; ++_r) for (int _c = 0; _c < 3; ++_c) if (board(blockRow * 3 + _r, blockCol * 3 + _c) == mark) ++count;
+			if (count > 1) return false; // if there's more than 1 it's illegal
 		}
 	}
 
 	return true;
 }
 
-// ---------------------------------------------------
-// solving methods
-// ---------------------------------------------------
+// --------------------- //
 
-// container class for notes, offering functions for adding/removing notes without having duplicates
-class notes_t
-{
-public:
-	tile_t notes[9];
-	int length;
+// -- solving helpers -- //
 
-	notes_t();
-	notes_t(const notes_t &other);
+// --------------------- //
 
-	bool contains(tile_t note) const;
+// type to use for keeping notes
+typedef std::bitset<9 + 1> notes_t;
 
-	void add(tile_t note);
-	void remove(tile_t note);
-	void removeAt(int index);
+// type to use for keeping notes for the entire board
+typedef notes_t boardnotes_t[9][9];
 
-	void add(const notes_t &notes);
-	void remove(const notes_t &notes);
-
-	void clear();
-	void set(tile_t note);
-
-	tile_t& operator[](int index);
-	tile_t operator[](int index) const;
-};
-
-notes_t::notes_t() : length(0) {}
-notes_t::notes_t(const notes_t &other) : length(other.length)
-{
-	for (int i(0); i < other.length; ++i)
-		notes[i] = other.notes[i];
-}
-
-bool notes_t::contains(tile_t note) const
-{
-	for (int i(0); i < length; ++i)
-		if (notes[i] == note) return true;
-
-	return false;
-}
-
-void notes_t::add(tile_t note)
-{
-	if (contains(note)) return;
-	notes[length++] = note;
-}
-void notes_t::remove(tile_t note)
-{
-	for(int i(0); i < length; ++i)
-		if (notes[i] == note)
-		{
-			notes[i] = notes[--length];
-			return;
-		}
-}
-void notes_t::removeAt(int index)
-{
-	notes[index] = notes[--length];
-}
-
-void notes_t::add(const notes_t &notes)
-{
-	for (int i(0); i < notes.length; ++i)
-		add(notes.notes[i]);
-}
-void notes_t::remove(const notes_t &notes)
-{
-	for (int i(0); i < notes.length; ++i)
-		remove(notes.notes[i]);
-}
-
-void notes_t::clear()
-{
-	length = 0;
-}
-void notes_t::set(tile_t note)
-{
-	length = 1;
-	notes[0] = note;
-}
-
-tile_t& notes_t::operator[](int index)
-{
-	return notes[index];
-}
-tile_t notes_t::operator[](int index) const
-{
-	return notes[index];
-}
-
-bool operator==(const notes_t &a, const notes_t &b)
-{
-	if (a.length != b.length) return false;
-	for (int i(0); i < a.length; ++i) if (!b.contains(a[i])) return false;
-
-	return true;
-}
-bool operator!=(const notes_t &a, const notes_t &b)
-{
-	return !(a == b);
-}
-
-typedef notes_t boardNotes_t[9][9];
-
-// copies the niotes in a into b
-void copyNotes(const boardNotes_t a, boardNotes_t b)
-{
-	for (int row(0); row < 9; ++row) for (int col(0); col < 9; ++col)
-		b[row][col] = a[row][col];
-}
-
-// returns true iff the given note is valid for the specified position
-bool notevalid(const Sudoku &board, int row, int col, tile_t note)
+// returns true iff the given note is valid for the specified position using the most basic rules of validity.
+bool notevalid(const sudoku &board, int row, int col, tile_t note)
 {
 	// iterate over each row and column of current position
 	// if any equal potential note, potential note is invalid
-	for (int i(0); i < 9; ++i)
+	for (int i = 0; i < 9; ++i)
 		if (board(i, col) == note || board(row, i) == note) return false;
 
 	// get the row and column of the 3x3 block we're in
-	int blockRow(row / 3), blockCol(col / 3);
+	int blockRow = row / 3;
+	int blockCol = col / 3;
 
 	// iterate over each position in the block
 	// if any equal potential note, potential note is invalid
-	for (int _row(0); _row < 3; ++_row) for (int _col(0); _col < 3; ++_col)
+	for (int _row = 0; _row < 3; ++_row) for (int _col = 0; _col < 3; ++_col)
 		if (board(blockRow * 3 + _row, blockCol * 3 + _col) == note) return false;
 
 	// otherwise, note is valid
 	return true;
 }
-
-// populates the notes and count with the valid notes at the specified row and column
-void getnotes(const Sudoku &board, int row, int col, notes_t &notes_out)
+// populates notes_out with all the valid notes at the specified row and column.
+// if the board position is already known (i.e. nonzero), the result is empty.
+void getnotes(const sudoku &board, int row, int col, notes_t &notes_out)
 {
 	// clear out the notes
-	notes_out.clear();
+	notes_out.reset();
 
 	// if tile is blank, generate the notes list
 	if (board(row, col) == 0)
-		for (tile_t sub(1); sub <= 9; ++sub)
-			if (notevalid(board, row, col, sub)) notes_out.notes[notes_out.length++] = sub;
-}
-// gets the boardNotes for the specified board
-void getnotesAll(const Sudoku &board, boardNotes_t boardNotes_out)
-{
-	for (int row(0); row < 9; ++row) for (int col(0); col < 9; ++col)
-		getnotes(board, row, col, boardNotes_out[row][col]);
-}
-
-// removes the tuple entries from the specified notes and chnges count_out accordingly
-void elucidateGroup(notes_t &notes_out, const notes_t *const otherNotes[8])
-{
-	// loop through each otherNotes (or until notes_out is empty)
-	for (int i(0); i < 8 && notes_out.length > 0; ++i)
 	{
-		// if this otherNotes has no notes, we can skip it
-		if (otherNotes[i]->length == 0) continue;
+		for (tile_t sub = 1; sub <= 9; ++sub)
+			if (notevalid(board, row, col, sub)) notes_out.set(sub);
+	}
+}
+// calls getnotes() for every position in the board and stores the results in boardnotes_out.
+void getnotes_all(const sudoku &board, boardnotes_t boardnotes_out)
+{
+	for (int row = 0; row < 9; ++row) for (int col = 0; col < 9; ++col)
+		getnotes(board, row, col, boardnotes_out[row][col]);
+}
 
-		// count the number of otherNotes that are equal to this otherNote
-		int count(1);
-		for (int j(0); j < 8; ++j)
-			if (i != j && *otherNotes[i] == *otherNotes[j]) ++count;
+// removes the tuple entries from the specified notes.
+// notes - the notes object representing the current position in question.
+// others - pointers to the 8 other notes objects representing the other tiles in a group (i.e. row, col, or block).
+// returns true iff a change was made to notes.
+void elucidate_group(notes_t &notes, const notes_t *const others[8])
+{
+	// loop through each other group member (or until notes is empty)
+	for (int i = 0; i < 8 && notes.any(); ++i)
+	{
+		// if this group member has no notes, we can skip it
+		if (others[i]->none()) continue;
 
-		// if the number of tiles with equal notes is equal to its number of notes, it is a tuple (and thus can be excluded)
-		if (count == otherNotes[i]->length) notes_out.remove(*otherNotes[i]);
+		// count the number of group members that are equal to this group member (including itself)
+		int count = 1;
+		for (int j = 0; j < 8; ++j)
+			if (i != j && *others[i] == *others[j]) ++count;
+
+		// if there are as many equal members as the number of notes in each, it is a tuple (and thus can be excluded from this tile)
+		if (count == others[i]->count()) notes &= ~*others[i];
 	}
 
-	for (int i(0); i < notes_out.length; ++i)
+	// for each possible value for the current position
+	for (int i = 1; i <= 9; ++i)
 	{
-		bool canSet(true);
-		for (int j(0); j < 8; ++j) if (otherNotes[j]->contains(notes_out[i]))
+		// only considering actual possibilities
+		if (notes.test(i))
 		{
-			canSet = false;
-			break;
-		}
+			bool canSet = true; // marks if we can set this notes object to one possibility
 
-		if (canSet)
-		{
-			notes_out.set(notes_out[i]);
-			break;
+			// if any of the other members contains this note we can't set the current location
+			for (int j = 0; j < 8; ++j) if (others[j]->test(i))
+			{
+				canSet = false;
+				break;
+			}
+
+			// otherwise no other tile in the group can be i, so it has to be here
+			if (canSet)
+			{
+				notes.reset();
+				notes.set(i);
+				break;
+			}
 		}
 	}
 }
 // returns an array of all the valid notes (removing tuples), saving the number of valid notes in count_out
-void getnotesAdv(const Sudoku &board, int row, int col, const boardNotes_t boardNotes, notes_t &notes_out)
+void getnotesAdv(const sudoku &board, int row, int col, const boardnotes_t boardNotes, notes_t &notes_out)
 {
 	// clone the notes list from the raw notes table
 	notes_out = boardNotes[row][col];
@@ -328,54 +153,56 @@ void getnotesAdv(const Sudoku &board, int row, int col, const boardNotes_t board
 
 	// get row
 	index = 0;
-	for (int i(0); i < 9; ++i) if (i != col) otherNotes[index++] = &boardNotes[row][i];
-	elucidateGroup(notes_out, otherNotes);
+	for (int i = 0; i < 9; ++i) if (i != col) otherNotes[index++] = &boardNotes[row][i];
+	elucidate_group(notes_out, otherNotes);
 
 	// get column
 	index = 0;
-	for (int i(0); i < 9; ++i) if (i != row) otherNotes[index++] = &boardNotes[i][col];
-	elucidateGroup(notes_out, otherNotes);
+	for (int i = 0; i < 9; ++i) if (i != row) otherNotes[index++] = &boardNotes[i][col];
+	elucidate_group(notes_out, otherNotes);
 
 	// get block
 	index = 0;
-	int blockRow(row / 3), blockCol(col / 3);
-	for (int _row(0); _row < 3; ++_row) for (int _col(0); _col < 3; ++_col)
+	int blockRow = row / 3;
+	int blockCol = col / 3;
+	for (int _row = 0; _row < 3; ++_row) for (int _col = 0; _col < 3; ++_col)
 	{
-		int r(blockRow * 3 + _row), c(blockCol * 3 + _col);
+		int r = blockRow * 3 + _row;
+		int c = blockCol * 3 + _col;
 		if (r != row || c != col) otherNotes[index++] = &boardNotes[r][c];
 	}
-	elucidateGroup(notes_out, otherNotes);
+	elucidate_group(notes_out, otherNotes);
 }
 
 // removes the specified note from the list of possible raw notes
-void removeNote(int row, int col, tile_t note, boardNotes_t boardNotes)
+void removeNote(int row, int col, tile_t note, boardnotes_t boardNotes)
 {
 	// remove from row
-	for (int i(0); i < 9; ++i) if(i != col)
-		boardNotes[row][i].remove(note);
+	for (int i = 0; i < 9; ++i) if(i != col)
+		boardNotes[row][i].reset(note);
 
 	// remove from column
-	for (int i(0); i < 9; ++i) if(i != row)
-		boardNotes[i][col].remove(note);
+	for (int i = 0; i < 9; ++i) if(i != row)
+		boardNotes[i][col].reset(note);
 
 	// remove from block
 	int blockRow(row / 3), blockCol(col / 3);
-	for (int _row(0); _row < 3; ++_row) for (int _col(0); _col < 3; ++_col)
+	for (int _row = 0; _row < 3; ++_row) for (int _col = 0; _col < 3; ++_col)
 	{
 		int r(blockRow * 3 + _row), c(blockCol * 3 + _col);
-		if (r != row || c != col) boardNotes[r][c].remove(note);
+		if (r != row || c != col) boardNotes[r][c].reset(note);
 	}
 
 	// clear all notes from the tile we're on
-	boardNotes[row][col].clear();
+	boardNotes[row][col].reset();
 }
 
 // solves the tiles that can be solved assuredly (only 1 valid possible value)
-bool solveSure(Sudoku &board)
+bool solveSure(sudoku &board)
 {
 	// store notes for the whole board
-	boardNotes_t boardNotes;
-	getnotesAll(board, boardNotes);
+	boardnotes_t boardNotes;
+	getnotes_all(board, boardNotes);
 
 	bool didone, completed;
 	do
@@ -384,7 +211,7 @@ bool solveSure(Sudoku &board)
 		completed = true;
 
 		// iterate over each row and col position
-		for (int row(0); row < 9; ++row) for (int col(0); col < 9; ++col)
+		for (int row = 0; row < 9; ++row) for (int col = 0; col < 9; ++col)
 		{
 			// if position is already known, skip it
 			if (board(row, col) != 0) continue;
@@ -394,16 +221,21 @@ bool solveSure(Sudoku &board)
 			getnotesAdv(board, row, col, boardNotes, notes);
 
 			// if there are notes, the board is in an invalid state (further solving is pointless)
-			if (notes.length == 0) return false;
+			if (notes.none()) return false;
 
 			// if only 1 note, it has to be that
-			if (notes.length == 1)
+			if (notes.count() == 1)
 			{
-				board(row, col) = notes.notes[0];
+				// wind val up to the actual note value to use
+				int val;
+				for (val = 0; !notes.test(val); ++val);
+
+				// then select that value
+				board(row, col) = val;
 				didone = true;
 
 				// remove the note from neighbor tiles
-				removeNote(row, col, notes.notes[0], boardNotes);
+				removeNote(row, col, val, boardNotes);
 			}
 			// otherwise all we can say is board is incomplete
 			else completed = false;
@@ -415,14 +247,14 @@ bool solveSure(Sudoku &board)
 	return completed;
 }
 // attempts to solve the board via guessing
-bool solveGuess(Sudoku &board)
+bool solveGuess(sudoku &board)
 {
 	// get the notes for the entire board
-	boardNotes_t boardNotes;
-	getnotesAll(board, boardNotes);
+	boardnotes_t boardNotes;
+	getnotes_all(board, boardNotes);
 	
 	// iterate throuh each tile on the board
-	for (int row(0); row < 9; ++row) for (int col(0); col < 9; ++col)
+	for (int row = 0; row < 9; ++row) for (int col = 0; col < 9; ++col)
 	{
 		// if tile not empty, skip
 		if (board(row, col) != 0) continue;
@@ -432,21 +264,25 @@ bool solveGuess(Sudoku &board)
 		getnotesAdv(board, row, col, boardNotes, notes);
 
 		// if there are no valid notes, a previous step was invalid (skip further work)
-		if (notes.length == 0) return false;
+		if (notes.none()) return false;
 
 		// iterate through each adv note
-		for (int i(0); i < notes.length; ++i)
+		for (int i = 0; i < 9; ++i)
 		{
-			// clone the board and make the change to the clone
-			Sudoku clone(board);
-			clone(row, col) = notes[i];
-
-			// apply the sure solver, and recurse if needed
-			// if successful, move the clone into board and return success
-			if (solveSure(clone) || solveGuess(clone))
+			// only consider actual possibilities
+			if (notes.test(i))
 			{
-				board = std::move(clone);
-				return true;
+				// clone the board and make the change to the clone
+				sudoku clone(board);
+				clone(row, col) = i;
+
+				// apply the sure solver, and recurse if needed
+				// if successful, move the clone into board and return success
+				if (solveSure(clone) || solveGuess(clone))
+				{
+					board = std::move(clone);
+					return true;
+				}
 			}
 		}
 	}
@@ -455,34 +291,40 @@ bool solveGuess(Sudoku &board)
 	return false;
 }
 
-bool Sudoku::solve(bool deep)
+bool sudoku::solve(bool deep)
 {
-	if (solveSure(*this)) return true;
-	if (deep && solveGuess(*this)) return true;
-
-	return false;
+	return solveSure(*this) || deep && solveGuess(*this);
 }
 
-// ---------------------------------------------------
-// io functions
-// ---------------------------------------------------
+// ------------------ //
 
-std::ostream& operator<<(std::ostream &ostr, const Sudoku &board)
+// -- io functions -- //
+
+// ------------------ //
+
+std::ostream& operator<<(std::ostream &ostr, const sudoku &board)
 {
-	for (int i(0); i < 9; ++i)
+	for (int i = 0; i < 9; ++i)
 	{
-		for (int j(0); j < 9; ++j)
-			ostr << board.data[i * 9 + j] << ' ';
+		for (int j = 0; j < 9; ++j)
+		{
+			ostr << (int)board(i, j); // output as int (because tile_t might be char, which has different symantics)
 
-		ostr << '\n';
+			if (j % 3 == 2) ostr << "   "; else ostr << ' ';
+		}
+
+		if (i % 3 == 2) ostr << "\n\n"; else ostr << '\n';
 	}
 
 	return ostr;
 }
-std::istream& operator>>(std::istream &istr, Sudoku &board)
+std::istream& operator>>(std::istream &istr, sudoku &board)
 {
-	for (int i(0); i < 81; ++i)
-		istr >> board.data[i];
-
+	int val; // temporary for reading values (because tile_t might be char, which has different symantics)
+	for (auto &i : board.data)
+	{
+		istr >> val;
+		i = val;
+	}
 	return istr;
 }
