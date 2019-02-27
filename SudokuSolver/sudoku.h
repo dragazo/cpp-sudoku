@@ -55,8 +55,7 @@ public: // -- solving -- //
 	bool valid() const;
 
 	// attempts to solve the board - returns true if successful
-	// setting deep to true applies the recursive solver (much slower)
-	bool solve(bool deep);
+	bool solve();
 
 public: // -- io functions -- //
 

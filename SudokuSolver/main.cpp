@@ -8,29 +8,26 @@
 int main(int argsc, const char *args[])
 {
 #ifdef DIAGNOSTICS
-	using namespace std::chrono;
-	constexpr int reps(2000);
+	constexpr int reps = 500;
 
-	Sudoku boards[reps];
+	sudoku boards[reps];
 	std::cin >> boards[0];
 
 	std::cout << boards[0].countComplete() << " / 81:\n" << boards[0] << '\n';
 
-	int deep(argsc == 2 && strcmp(args[1], "deep") == 0);
-
 	for (int i(1); i < reps; ++i) boards[i] = boards[0];
 
-	high_resolution_clock::time_point start(high_resolution_clock::now());
+	auto start = std::chrono::high_resolution_clock::now();
 
 	for (int i(0); i < reps; ++i)
-		boards[i].solve(deep);
+		boards[i].solve();
 
-	high_resolution_clock::duration duration(high_resolution_clock::now() - start);
+	auto duration = std::chrono::high_resolution_clock::now() - start;
 	
 	std::cout << boards[0].countComplete() << " / 81:\n" << boards[0];
 
-	long long elapsed(duration_cast<microseconds>(duration).count());
-	long long average(elapsed / reps);
+	long long elapsed = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+	long long average = elapsed / reps;
 
 	std::cout << "\nTime Elapsed: " << elapsed << " us";
 	std::cout << "\nAverage Time over " << reps << " cycles: " << average << " us";
@@ -42,7 +39,7 @@ int main(int argsc, const char *args[])
 
 	std::cout << board.countComplete() << " / 81:\n" << board << std::endl;
 
-	board.solve(argsc == 2 && strcmp(args[1], "deep") == 0);
+	board.solve();
 
 	std::cout << board.countComplete() << " / 81:\n" << board;
 

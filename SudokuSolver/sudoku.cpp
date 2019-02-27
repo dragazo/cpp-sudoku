@@ -2,6 +2,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <bitset>
+#include <cassert>
+#include <queue>
 
 #include "Sudoku.h"
 
@@ -43,11 +45,11 @@ bool sudoku::valid() const
 	return true;
 }
 
-// --------------------- //
+// ---------------------- //
 
-// -- solving helpers -- //
+// -- basic note logic -- //
 
-// --------------------- //
+// ---------------------- //
 
 // type to use for keeping notes
 typedef std::bitset<9 + 1> notes_t;
@@ -88,6 +90,8 @@ void getnotes(const sudoku &board, int row, int col, notes_t &notes_out)
 		for (tile_t sub = 1; sub <= 9; ++sub)
 			if (notevalid(board, row, col, sub)) notes_out.set(sub);
 	}
+	// otherwise it has one note - its actual value
+	else notes_out.set(board(row, col));
 }
 // calls getnotes() for every position in the board and stores the results in boardnotes_out.
 void getnotes_all(const sudoku &board, boardnotes_t boardnotes_out)
@@ -96,204 +100,214 @@ void getnotes_all(const sudoku &board, boardnotes_t boardnotes_out)
 		getnotes(board, row, col, boardnotes_out[row][col]);
 }
 
-// removes the tuple entries from the specified notes.
-// notes - the notes object representing the current position in question.
-// others - pointers to the 8 other notes objects representing the other tiles in a group (i.e. row, col, or block).
-// returns true iff a change was made to notes.
-void elucidate_group(notes_t &notes, const notes_t *const others[8])
+// --------------------------------------- //
+
+// -- advanced note reduction utilities -- //
+
+// --------------------------------------- //
+
+void print_orthogonality(boardnotes_t notes)
 {
-	// loop through each other group member (or until notes is empty)
-	for (int i = 0; i < 8 && notes.any(); ++i)
+	for (int i = 0; i < 9; ++i)
 	{
-		// if this group member has no notes, we can skip it
-		if (others[i]->none()) continue;
+		for (int j = 0; j < 9; ++j)
+		{
+			std::cout << notes[i][j].count() << ' ';
+		}
+		std::cout << '\n';
+	}
+}
+void print_group(notes_t *group[9])
+{
+	for (int i = 0; i < 9; ++i) std::cout << std::hex << group[i]->to_ulong() << std::dec << '\n';
+}
 
-		// count the number of group members that are equal to this group member (including itself)
-		int count = 1;
-		for (int j = 0; j < 8; ++j)
-			if (i != j && *others[i] == *others[j]) ++count;
+// applies reduction logic to the specified notes group.
+// group - an array of pointers to the 9 notes objects that represents the group (i.e. row, col, or block) (order doesn't matter).
+// returns true if any reductions were successful.
+bool reduce(notes_t *group[9])
+{
+	bool did_something = false; // flags if we did anything - defaults to false
 
-		// if there are as many equal members as the number of notes in each, it is a tuple (and thus can be excluded from this tile)
-		if (count == others[i]->count()) notes &= ~*others[i];
+	// for every combination of 1 to 8 group members
+	for (int combination = (1 << 9) - 2; combination > 0; --combination)
+	{
+		notes_t notes_union;  // the union of notes in this combination
+		int member_count = 0; // the number of group members in this combination
+
+		// for each group member in this combination
+		for (int i = 0; i < 9; ++i) if ((combination >> i) & 1)
+		{
+			notes_union |= *group[i]; // add this member's notes to the notes union
+			++member_count; // inc the number of members in this combination
+		}
+
+		// if the notes union has the same number of possibles as there are members in this combination, it's a tuple
+		if (notes_union.count() == member_count)
+		{
+			// now we know it's a tuple, so we can eliminate the notes union choices from all group members not in this combination
+			for (int i = 0; i < 9; ++i) if (!((combination >> i) & 1))
+			{
+				// update the did something flag - becomes true if this position has anything in common with the notes union
+				did_something = did_something || (*group[i] & notes_union).any();
+
+				// eliminate the notes union from this position
+				*group[i] &= ~notes_union;
+			}
+		}
 	}
 
-	// for each possible value for the current position
+	// for each tile in the group with more than 1 choice (as individuals now)
+	for (int i = 0; i < 9; ++i) if (group[i]->count() > 1)
+	{
+		// for each possible value for this tile
+		for (int j = 1; j <= 9; ++j) if (group[i]->test(j))
+		{
+			bool unique = true; // mark the note value as unique to begin with
+
+			// look through all the group members and see if any of them can also be that value
+			for (int k = 0; k < 9; ++k) if (i != k && group[k]->test(j))
+			{
+				// in this case the value's not unique
+				unique = false;
+				break;
+			}
+
+			// if the note was unique, we know this position has to be that
+			if (unique)
+			{
+				// update the did something flag
+				did_something = true;
+
+				// set the unique note as the only option for this tile
+				group[i]->reset();
+				group[i]->set(j);
+
+				break; // go on to the next tile
+			}
+		}
+	}
+
+	// return the did something flag
+	return did_something;
+}
+// applies group reduction to every group on the board.
+// returns true if a change was made.
+bool reduce(boardnotes_t boardNotes)
+{
+	notes_t *group[9]; // the group array to use
+	bool did_something = false; // flag that marks if we did something - defaults to false
+
+	// reduce all the rows
+	for (int row = 0; row < 9; ++row)
+	{
+		for (int i = 0; i < 9; ++i) group[i] = &boardNotes[row][i];
+		if (reduce(group)) did_something = true;
+	}
+
+	// reduce all the cols
+	for (int col = 0; col < 9; ++col)
+	{
+		for (int i = 0; i < 9; ++i) group[i] = &boardNotes[i][col];
+		if (reduce(group)) did_something = true;
+	}
+
+	// reduce all the blocks
+	for (int blockRow = 0; blockRow < 3; ++blockRow) for (int blockCol = 0; blockCol < 3; ++blockCol)
+	{
+		for (int _row = 0; _row < 3; ++_row) for (int _col = 0; _col < 3; ++_col)
+		{
+			group[3 * _row + _col] = &boardNotes[blockRow * 3 + _row][blockCol * 3 + _col];
+		}
+		if (reduce(group)) did_something = true;
+	}
+
+	// return the did something flag
+	return did_something;
+}
+
+// --------------------- //
+
+// -- solving helpers -- //
+
+// --------------------- //
+
+// represents a guess entry for the guess queue
+struct guess_entry
+{
+	int row;
+	int col;
+	notes_t notes;
+
+	// comparison operator - arranges them in descending number of possible notes
+	friend bool operator<(const guess_entry &a, const guess_entry &b) { return a.notes.count() > b.notes.count(); }
+};
+
+// given a notes set, returns the lowest set gues bit (i.e. the lowest ordinal possible value).
+// if no bits are set, returns 0.
+int lowest_set_guess(notes_t n)
+{
+	// return the lowest set guess
 	for (int i = 1; i <= 9; ++i)
-	{
-		// only considering actual possibilities
-		if (notes.test(i))
-		{
-			bool canSet = true; // marks if we can set this notes object to one possibility
+		if (n.test(i)) return i;
 
-			// if any of the other members contains this note we can't set the current location
-			for (int j = 0; j < 8; ++j) if (others[j]->test(i))
-			{
-				canSet = false;
-				break;
-			}
-
-			// otherwise no other tile in the group can be i, so it has to be here
-			if (canSet)
-			{
-				notes.reset();
-				notes.set(i);
-				break;
-			}
-		}
-	}
-}
-// returns an array of all the valid notes (removing tuples), saving the number of valid notes in count_out
-void getnotesAdv(const sudoku &board, int row, int col, const boardnotes_t boardNotes, notes_t &notes_out)
-{
-	// clone the notes list from the raw notes table
-	notes_out = boardNotes[row][col];
-
-	const notes_t *otherNotes[8];
-	int index;
-
-	// get row
-	index = 0;
-	for (int i = 0; i < 9; ++i) if (i != col) otherNotes[index++] = &boardNotes[row][i];
-	elucidate_group(notes_out, otherNotes);
-
-	// get column
-	index = 0;
-	for (int i = 0; i < 9; ++i) if (i != row) otherNotes[index++] = &boardNotes[i][col];
-	elucidate_group(notes_out, otherNotes);
-
-	// get block
-	index = 0;
-	int blockRow = row / 3;
-	int blockCol = col / 3;
-	for (int _row = 0; _row < 3; ++_row) for (int _col = 0; _col < 3; ++_col)
-	{
-		int r = blockRow * 3 + _row;
-		int c = blockCol * 3 + _col;
-		if (r != row || c != col) otherNotes[index++] = &boardNotes[r][c];
-	}
-	elucidate_group(notes_out, otherNotes);
+	// otherwise no bits are set, return 0
+	return 0;
 }
 
-// removes the specified note from the list of possible raw notes
-void removeNote(int row, int col, tile_t note, boardnotes_t boardNotes)
+bool sudoku::solve()
 {
-	// remove from row
-	for (int i = 0; i < 9; ++i) if(i != col)
-		boardNotes[row][i].reset(note);
+	sudoku &board = *this; // alias the board for convenience
 
-	// remove from column
-	for (int i = 0; i < 9; ++i) if(i != row)
-		boardNotes[i][col].reset(note);
+	boardnotes_t boardNotes;  // notes for the entire board
+	std::priority_queue<guess_entry> guess_queue; // the sorted queue of guesses to make - top is the guess entry with the least number of possible values
 
-	// remove from block
-	int blockRow(row / 3), blockCol(col / 3);
-	for (int _row = 0; _row < 3; ++_row) for (int _col = 0; _col < 3; ++_col)
-	{
-		int r(blockRow * 3 + _row), c(blockCol * 3 + _col);
-		if (r != row || c != col) boardNotes[r][c].reset(note);
-	}
-
-	// clear all notes from the tile we're on
-	boardNotes[row][col].reset();
-}
-
-// solves the tiles that can be solved assuredly (only 1 valid possible value)
-bool solveSure(sudoku &board)
-{
-	// store notes for the whole board
-	boardnotes_t boardNotes;
+	// populate basic notes and repeat reduction logic until there is no change
 	getnotes_all(board, boardNotes);
-
-	bool didone, completed;
-	do
-	{
-		didone = false;
-		completed = true;
-
-		// iterate over each row and col position
-		for (int row = 0; row < 9; ++row) for (int col = 0; col < 9; ++col)
-		{
-			// if position is already known, skip it
-			if (board(row, col) != 0) continue;
-
-			// get simplified notes for this tile
-			notes_t notes;
-			getnotesAdv(board, row, col, boardNotes, notes);
-
-			// if there are notes, the board is in an invalid state (further solving is pointless)
-			if (notes.none()) return false;
-
-			// if only 1 note, it has to be that
-			if (notes.count() == 1)
-			{
-				// wind val up to the actual note value to use
-				int val;
-				for (val = 0; !notes.test(val); ++val);
-
-				// then select that value
-				board(row, col) = val;
-				didone = true;
-
-				// remove the note from neighbor tiles
-				removeNote(row, col, val, boardNotes);
-			}
-			// otherwise all we can say is board is incomplete
-			else completed = false;
-		}
-	}
-	// do solve passes while one was done and it's not completed
-	while (didone && !completed);
-
-	return completed;
-}
-// attempts to solve the board via guessing
-bool solveGuess(sudoku &board)
-{
-	// get the notes for the entire board
-	boardnotes_t boardNotes;
-	getnotes_all(board, boardNotes);
+	while (reduce(boardNotes));
 	
-	// iterate throuh each tile on the board
+	// iterate through each tile on the board
 	for (int row = 0; row < 9; ++row) for (int col = 0; col < 9; ++col)
 	{
-		// if tile not empty, skip
-		if (board(row, col) != 0) continue;
+		// get the number of notes for this tile
+		auto note_count = boardNotes[row][col].count();
 
-		// get the adv notes for this tile
-		notes_t notes;
-		getnotesAdv(board, row, col, boardNotes, notes);
-
-		// if there are no valid notes, a previous step was invalid (skip further work)
-		if (notes.none()) return false;
-
-		// iterate through each adv note
-		for (int i = 0; i < 9; ++i)
-		{
-			// only consider actual possibilities
-			if (notes.test(i))
-			{
-				// clone the board and make the change to the clone
-				sudoku clone(board);
-				clone(row, col) = i;
-
-				// apply the sure solver, and recurse if needed
-				// if successful, move the clone into board and return success
-				if (solveSure(clone) || solveGuess(clone))
-				{
-					board = std::move(clone);
-					return true;
-				}
-			}
-		}
+		// if there's more than 1, add it to the guess queue
+		if (note_count > 1) guess_queue.push({ row, col, boardNotes[row][col] });
+		// if there's exactly one, we know the value for this position - fill it in
+		else if (note_count == 1) board(row, col) = lowest_set_guess(boardNotes[row][col]);
+		// otherwise this board is impossible - return failure
+		else return false;
 	}
 
-	// otherwise was unsuccessful
-	return false;
-}
+	// now we need to handle all the guesses
+	for (; !guess_queue.empty(); guess_queue.pop())
+	{
+		// get the top guess entry (one with the fewest possible values)
+		guess_entry entry = guess_queue.top();
 
-bool sudoku::solve(bool deep)
-{
-	return solveSure(*this) || deep && solveGuess(*this);
+		// for each of the possible guesses
+		for (int i = 1; i <= 9; ++i) if (entry.notes.test(i))
+		{
+			// record the previous board state
+			sudoku cpy = board;
+
+			// make the change to this position (make the guess)
+			board(entry.row, entry.col) = i;
+
+			// recurse - if that succeeds return true
+			if (board.solve()) return true;
+
+			// otherwise undo all the changes that did and continue searching
+			board = std::move(cpy);
+		}
+
+		// if we get to this point we've exhausted all possible guesses for this tile and nothing worked - fail
+		return false;
+	}
+
+	// if we get here we have no more guesses to make - return if we succeeded or not
+	return board.filled() && board.valid();
 }
 
 // ------------------ //
