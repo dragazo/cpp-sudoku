@@ -3,7 +3,7 @@
 
 #include "sudoku.h"
 
-//#define DIAGNOSTICS
+#define DIAGNOSTICS
 
 int main(int argsc, const char *args[])
 {
@@ -15,12 +15,11 @@ int main(int argsc, const char *args[])
 
 	std::cout << boards[0].countComplete() << " / 81:\n" << boards[0] << '\n';
 
-	for (int i(1); i < reps; ++i) boards[i] = boards[0];
+	for (int i = 0; i < reps; ++i) boards[i] = boards[0];
 
 	auto start = std::chrono::high_resolution_clock::now();
 
-	for (int i(0); i < reps; ++i)
-		boards[i].solve();
+	for (int i = 0; i < reps; ++i) boards[i].solve();
 
 	auto duration = std::chrono::high_resolution_clock::now() - start;
 	

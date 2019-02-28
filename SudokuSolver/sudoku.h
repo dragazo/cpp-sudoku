@@ -7,7 +7,7 @@
 #include <type_traits>
 #include <cstdint>
 
-typedef std::int_fast8_t tile_t; // type to use for representing tile values
+typedef unsigned char tile_t; // type to use for representing tile values
 
 class sudoku
 {
@@ -25,8 +25,8 @@ public: // -- ctor / dtor / asgn -- //
 public: // -- board access -- //
 
 	// gets the value at the specified position.
-	tile_t& operator()(int row, int col) { return data[row * 9 + col]; }
-	tile_t operator()(int row, int col) const { return data[row * 9 + col]; }
+	tile_t& operator()(std::size_t row, std::size_t col) { return data[row * 9 + col]; }
+	tile_t operator()(std::size_t row, std::size_t col) const { return data[row * 9 + col]; }
 
 	// sets every tile to zero (blank).
 	void clear() { std::fill(data.begin(), data.end(), (tile_t)0); }
