@@ -1,5 +1,6 @@
 #include <iostream>
 #include <chrono>
+#include <cstdlib>
 
 #include "sudoku.h"
 
@@ -8,7 +9,7 @@
 int main(int argsc, const char *args[])
 {
 #ifdef DIAGNOSTICS
-	constexpr int reps = 500;
+	constexpr int reps = 100;
 
 	sudoku boards[reps];
 	std::cin >> boards[0];
@@ -19,7 +20,7 @@ int main(int argsc, const char *args[])
 
 	auto start = std::chrono::high_resolution_clock::now();
 
-	for (int i = 0; i < reps; ++i) boards[i].solve();
+	for (int i = 0; i < reps; ++i) if (!boards[i].solve()) { std::cerr << "SOLVE FAILURE!!\n"; std::abort(); }
 
 	auto duration = std::chrono::high_resolution_clock::now() - start;
 	
@@ -29,7 +30,7 @@ int main(int argsc, const char *args[])
 	long long average = elapsed / reps;
 
 	std::cout << "\nTime Elapsed: " << elapsed << " us";
-	std::cout << "\nAverage Time over " << reps << " cycles: " << average << " us";
+	std::cout << "\nAverage Time over " << reps << " cycles: " << average << " us\n";
 #else
 
 	sudoku board;
@@ -40,7 +41,7 @@ int main(int argsc, const char *args[])
 
 	board.solve();
 
-	std::cout << board.countComplete() << " / 81:\n" << board;
+	std::cout << board.countComplete() << " / 81:\n" << board << '\n';
 
 #endif
 }

@@ -7,6 +7,8 @@
 
 #include "Sudoku.h"
 
+#define DRAGAZO_SUDOKU_USE_TUPLE_REDUCE 0
+
 // ----------- //
 
 // -- query -- //
@@ -129,42 +131,74 @@ void print_group(notes_t *group[9])
 	for (std::size_t i = 0; i < 9; ++i) std::cout << std::hex << group[i]->to_ulong() << std::dec << '\n';
 }
 
-// applies tuple reduction logic to the specified group.
-// group - an array of pointers to the 9 notes objects that represent the group (i.e. row, col, or block).
-// did_something - output flag that is set to true if the call to this function makes a change.
-// returns false if the reduction results in an invalid board state (e.g. tile with no valid values).
-bool tuple_reduce(notes_t *group[9], bool &did_something)
-{
-	// for every combination of 1 to 8 group members
-	for (std::size_t combination = (1 << 9) - 2; combination > 0; --combination)
+bool tuple_reduce_recursive(notes_t *group[9], bool &did_something, notes_t *members[9], notes_t *non_members[9], notes_t notes_union, std::size_t member_count, std::size_t non_member_count, std::size_t depth)
+{	
+	// if we're not in the leaf case
+	if (depth < 9)
 	{
-		notes_t notes_union;  // the union of notes in this combination
-		std::size_t member_count = 0; // the number of group members in this combination
+		// add current group item to the members array and recurse including it
+		members[member_count] = group[depth];
+		if (!tuple_reduce_recursive(group, did_something, members, non_members, notes_union | *group[depth], member_count + 1, non_member_count, depth + 1)) return false;
 
-		// for each group member in this combination
-		for (std::size_t i = 0; i < 9; ++i) if ((combination >> i) & 1)
-		{
-			notes_union |= *group[i]; // add this member's notes to the notes union
-			++member_count; // inc the number of members in this combination
-		}
-
+		// add current group item to the non-members array and recurse not including it
+		non_members[non_member_count] = group[depth];
+		if (!tuple_reduce_recursive(group, did_something, members, non_members, notes_union, member_count, non_member_count + 1, depth + 1)) return false;
+	}
+	// otherwise we need to perform the leaf case reduction logic now that we have a full group
+	else
+	{
 		// if the notes union has the same number of possibles as there are members in this combination, it's a tuple
 		if (notes_union.count() == member_count)
 		{
-			// now we know it's a tuple, so we can eliminate the notes union choices from all group members not in this combination
-			for (std::size_t i = 0; i < 9; ++i) if (!((combination >> i) & 1))
+			// now we know it's a tuple, so we can eliminate the notes union choices from all non-group members
+			for (std::size_t i = 0; i < non_member_count; ++i)
 			{
 				// update the did something flag - becomes true if this position has anything in common with the notes union
-				did_something = did_something || (*group[i] & notes_union).any();
+				did_something = did_something || (*non_members[i] & notes_union).any();
 
 				// eliminate the notes union from this position - if the result has no valid values, this is an invalid board state - fail
-				if ((*group[i] &= ~notes_union).none()) return false;
+				if ((*non_members[i] &= ~notes_union).none()) return false;
 			}
 		}
 	}
 
 	// no errors
 	return true;
+}
+
+// applies tuple reduction logic to the specified group.
+// group - an array of pointers to the 9 notes objects that represent the group (i.e. row, col, or block).
+// did_something - output flag that is set to true if the call to this function makes a change.
+// returns false if the reduction results in an invalid board state (e.g. tile with no valid values).
+bool tuple_reduce(notes_t *group[9], bool &did_something)
+{
+	#if DRAGAZO_SUDOKU_USE_TUPLE_REDUCE
+
+	notes_t *members[9];
+	notes_t *non_members[9];
+
+	return tuple_reduce_recursive(group, did_something, members, non_members, 0, 0, 0, 0);
+
+	#else
+
+	// for each group member
+	for (std::size_t i = 0; i < 9; ++i)
+	{
+		// get the group member notes value (raw)
+		const auto notes = group[i]->to_ullong();
+
+		// if there's at most 1 thing it can be
+		if ((notes & (notes - 1)) == 0)
+		{
+			// remove said note from all other group members
+			for (std::size_t j = 0; j < 9; ++j)
+				if (i != j && (*group[j] &= ~notes).none()) return false;
+		}
+	}
+
+	return true;
+
+	#endif
 }
 
 // applies unique note reduction logic to the specified group - returns true iff a change was made.
@@ -270,6 +304,8 @@ std::size_t lowest_set_guess(notes_t n)
 	return 0;
 }
 
+int bad_guesses = 0;
+
 bool sudoku::solve()
 {
 	boardnotes_t boardNotes; // notes for the entire board
@@ -321,6 +357,8 @@ bool sudoku::solve()
 
 			// recurse - if that succeeds return true
 			if (solve()) return true;
+
+			std::cout << "bad guess " << ++bad_guesses << '\n';
 
 			// otherwise undo all the changes that did and continue searching
 			*this = std::move(cpy);
