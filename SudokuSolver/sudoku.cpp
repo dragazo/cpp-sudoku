@@ -9,6 +9,10 @@
 
 #define DRAGAZO_SUDOKU_USE_TUPLE_REDUCE 0
 
+#define DRAGAZO_SUDOKU_LOOP_REDUCE 1
+
+#define DRAGAZO_SUDOKU_GUESS_OPTIMIZATION 1
+
 // ----------- //
 
 // -- query -- //
@@ -252,7 +256,9 @@ bool reduce(boardnotes_t boardNotes)
 	bool did_something; // flag used to check if we did anything during an iteration
 
 	// repeat reduction logic until there is no change
+	#if DRAGAZO_SUDOKU_LOOP_REDUCE
 	do
+	#endif
 	{
 		did_something = false; // so far we haven't done anything this iteration
 
@@ -280,7 +286,9 @@ bool reduce(boardnotes_t boardNotes)
 			if (!reduce(group, did_something)) return false;
 		}
 	}
+	#if DRAGAZO_SUDOKU_LOOP_REDUCE
 	while (did_something);
+	#endif
 
 	// no errors
 	return true;
@@ -310,6 +318,10 @@ bool sudoku::solve()
 {
 	boardnotes_t boardNotes; // notes for the entire board
 
+	#if DRAGAZO_SUDOKU_GUESS_OPTIMIZATION
+	unsigned char occurrences[10] = {}; // note occurrence count array - zero initialized
+	#endif
+
 	std::size_t best_guess_row, best_guess_col; // row and col of best guess
 	std::size_t best_guess_count = 0xbad;       // number of possible values in the best guess - 0xbad indicates no current best guess
 
@@ -333,6 +345,20 @@ bool sudoku::solve()
 
 				best_guess_count = note_count;
 			}
+
+			#if DRAGAZO_SUDOKU_GUESS_OPTIMIZATION
+			// also populate occurrences
+			std::size_t raw = boardNotes[row][col].to_ulong();
+			if (raw & 0x0002) ++occurrences[1];
+			if (raw & 0x0004) ++occurrences[2];
+			if (raw & 0x0008) ++occurrences[3];
+			if (raw & 0x0010) ++occurrences[4];
+			if (raw & 0x0020) ++occurrences[5];
+			if (raw & 0x0040) ++occurrences[6];
+			if (raw & 0x0080) ++occurrences[7];
+			if (raw & 0x0100) ++occurrences[8];
+			if (raw & 0x0200) ++occurrences[9];
+			#endif
 		}
 		// if there's exactly one, we know the value for this position - fill it in
 		else if (note_count == 1) (*this)(row, col) = (tile_t)lowest_set_guess(boardNotes[row][col]);
@@ -346,19 +372,30 @@ bool sudoku::solve()
 		// get the best guess 
 		notes_t best = boardNotes[best_guess_row][best_guess_col];
 
+		std::pair<unsigned char, tile_t> guesses[9]; // guesses array - pairs of (occurrences, value)
+		std::size_t guesses_count = 0; // number of guesses
+
+		// populate guesses array
+		for (std::size_t note = 1; note <= 9; ++note) if (best.test(note)) guesses[guesses_count++] = {occurrences[note], (tile_t)note };
+
+		// sort guesses in order of descending likelihood
+		std::sort(guesses, guesses + guesses_count, [](const auto &a, const auto &b) { return a.first < b.first; });
+
+		//std::cout << "options : "; for (std::size_t i = 0; i < guesses_count; ++i) std::cout << '(' << (int)guesses[i].first << " : " << (int)guesses[i].second << ") "; std::cout << '\n';
+
 		// for each of the possible guesses
-		for (std::size_t i = 1; i <= 9; ++i) if (best.test(i))
+		for (std::size_t i = 0; i < guesses_count; ++i)
 		{
 			// record the previous board state
 			sudoku cpy = *this;
 
 			// make the change to this position (make the guess)
-			(*this)(best_guess_row, best_guess_col) = (tile_t)i;
+			(*this)(best_guess_row, best_guess_col) = guesses[i].second;
 
 			// recurse - if that succeeds return true
 			if (solve()) return true;
 
-			std::cout << "bad guess " << ++bad_guesses << '\n';
+			//std::cout << "bad guess " << ++bad_guesses << " picked " << (int)guesses[i].second << '\n';
 
 			// otherwise undo all the changes that did and continue searching
 			*this = std::move(cpy);
